@@ -25,7 +25,7 @@ const http      = require('http');
 const { URL }   = require('url');
 
 const app  = express();
-const PORT = process.env.PORT || 3400;
+const PORT = process.env.PORT || 8080;
 
 app.use(express.json());
 
@@ -174,15 +174,17 @@ async function fullScan(url) {
 // FETCHER
 // ═══════════════════════════════════════════════
 async function fetchPage(url) {
-  const t0 = Date.now();
-  const response = await httpClient.get(url);
+  const t0 = Date.now()
+  const response = await httpClient.get(url, {
+    validateStatus: (status) => status < 500, // accept anything under 500
+  })
   return {
-    html:       response.data,
+    html:       typeof response.data === 'string' ? response.data : JSON.stringify(response.data),
     headers:    response.headers,
     finalUrl:   response.request?.res?.responseUrl || url,
     statusCode: response.status,
     loadTime:   Date.now() - t0,
-  };
+  }
 }
 
 function normalizeUrl(url) {
