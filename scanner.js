@@ -25,7 +25,7 @@ const http      = require('http');
 const { URL }   = require('url');
 
 const app  = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3400;
 
 app.use(express.json());
 
@@ -98,6 +98,7 @@ async function fullScan(url) {
   const [
     cmsInfo,
     builderInfo,
+    themeInfo,
     seoInfo,
     performanceInfo,
     wpRestData,
@@ -107,6 +108,7 @@ async function fullScan(url) {
   ] = await Promise.allSettled([
     Promise.resolve(detectCMS($, headers, html)),
     Promise.resolve(detectBuilder($, html)),
+    Promise.resolve(detectTheme($, html)),
     Promise.resolve(extractSEO($, finalUrl)),
     Promise.resolve(measurePerformance(html, headers, loadTime)),
     fetchWpRestApi(finalUrl),
@@ -128,6 +130,7 @@ async function fullScan(url) {
 
     cms:          get(cmsInfo),
     builder:      get(builderInfo),
+    theme:        get(themeInfo),
     seo:          get(seoInfo),
     performance:  get(performanceInfo),
     security:     get(securityInfo),
@@ -174,17 +177,15 @@ async function fullScan(url) {
 // FETCHER
 // ═══════════════════════════════════════════════
 async function fetchPage(url) {
-  const t0 = Date.now()
-  const response = await httpClient.get(url, {
-    validateStatus: (status) => status < 500, // accept anything under 500
-  })
+  const t0 = Date.now();
+  const response = await httpClient.get(url);
   return {
-    html:       typeof response.data === 'string' ? response.data : JSON.stringify(response.data),
+    html:       response.data,
     headers:    response.headers,
     finalUrl:   response.request?.res?.responseUrl || url,
     statusCode: response.status,
     loadTime:   Date.now() - t0,
-  }
+  };
 }
 
 function normalizeUrl(url) {
@@ -343,6 +344,73 @@ function detectBuilder($, html) {
 
   // Sort by confidence
   return builders.sort((a, b) => b.confidence - a.confidence);
+}
+
+// ═══════════════════════════════════════════════
+// THEME DETECTION
+// ═══════════════════════════════════════════════
+function detectTheme($, html) {
+  const theme = { name: null, slug: null, is_child: false, parent: null, signals: [] }
+
+  // 1. Stylesheet links
+  const styleLinks = []
+  $('link[rel="stylesheet"]').each((_, el) => {
+    const href = $(el).attr('href') || ''
+    if (href.includes('/wp-content/themes/')) styleLinks.push(href)
+  })
+
+  if (styleLinks.length > 0) {
+    const slugs = [...new Set(styleLinks.map(l => {
+      const m = l.match(/\/wp-content\/themes\/([^/]+)\//)
+      return m ? m[1] : null
+    }).filter(Boolean))]
+
+    if (slugs.length > 0) {
+      theme.slug = slugs[0]
+      theme.signals.push('stylesheet link')
+    }
+    if (slugs.length > 1) {
+      theme.is_child = true
+      theme.parent   = slugs[1]
+      theme.signals.push('child theme')
+    }
+  }
+
+  // 2. Body class
+  const bodyClass = $('body').attr('class') || ''
+  const bodyMatch = bodyClass.match(/theme-([a-z0-9-]+)/)
+  if (bodyMatch && !theme.slug) { theme.slug = bodyMatch[1]; theme.signals.push('body class') }
+
+  // 3. Known fingerprints
+  const THEMES = [
+    { slug: 'hello-elementor',   name: 'Hello Elementor',     re: /hello-elementor/ },
+    { slug: 'astra',             name: 'Astra',               re: /astra/ },
+    { slug: 'generatepress',     name: 'GeneratePress',        re: /generatepress/ },
+    { slug: 'avada',             name: 'Avada',               re: /avada|fusion-core/ },
+    { slug: 'divi',              name: 'Divi',                re: /Divi|et_pb_/ },
+    { slug: 'oceanwp',           name: 'OceanWP',             re: /oceanwp/ },
+    { slug: 'neve',              name: 'Neve',                re: /\bneve\b/ },
+    { slug: 'storefront',        name: 'Storefront',          re: /storefront/ },
+    { slug: 'blocksy',           name: 'Blocksy',             re: /blocksy/ },
+    { slug: 'kadence',           name: 'Kadence',             re: /kadence/ },
+    { slug: 'twentytwentyfour',  name: 'Twenty Twenty-Four',  re: /twentytwentyfour/ },
+    { slug: 'twentytwentythree', name: 'Twenty Twenty-Three', re: /twentytwentythree/ },
+    { slug: 'twentytwentytwo',   name: 'Twenty Twenty-Two',   re: /twentytwentytwo/ },
+  ]
+  for (const t of THEMES) {
+    if (t.re.test(html)) {
+      if (!theme.slug) theme.slug = t.slug
+      if (!theme.name) { theme.name = t.name; theme.signals.push(`known: ${t.name}`) }
+      break
+    }
+  }
+
+  // 4. Prettify slug → name
+  if (theme.slug && !theme.name) {
+    theme.name = theme.slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  }
+
+  return theme
 }
 
 // ═══════════════════════════════════════════════
