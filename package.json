@@ -1,8 +1,9 @@
 {
   "name": "ignyous-scanner",
   "version": "1.0.0",
-  "description": "ignyous.ai site scanning service — detects WordPress, builders, SEO, performance",
-  "main": "scanner.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "start": "node scanner.js",
     "dev":   "nodemon scanner.js",
@@ -15,8 +16,5 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }
